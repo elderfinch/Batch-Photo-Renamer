@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Batch Photo Renamer</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { padding: 2rem; background:#f8f9fa; }
+    .thumb { width: 80px; height: 80px; object-fit:cover; border-radius:6px; border:1px solid #ddd; }
+    .file-row { gap:1rem; align-items:center; display:flex; margin-bottom:0.5rem; padding:0.5rem; background:#fff; border-radius:6px; border:1px solid #e9ecef; }
+    .muted { color:#6c757d; font-size:0.9rem; }
+    .small-note { font-size:0.85rem; color:#6c757d; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h1 id="title"></h1>
+      <select id="lang-select" class="form-select w-auto">
+        <option value="en">English</option>
+        <option value="pt">Português</option>
+      </select>
+    </div>
+
+    <p id="instructions" class="small-note"></p>
+
+    <div class="mb-3">
+      <label id="select-label" class="form-label"></label>
+      <input id="file-input" class="form-control" type="file" accept="image/*" multiple>
+    </div>
+
+    <div class="mb-3">
+      <button id="preview-btn" class="btn btn-primary me-2"></button>
+      <button id="download-all-btn" class="btn btn-success" disabled></button>
+      <button id="clear-btn" class="btn btn-outline-secondary ms-2"></button>
+    </div>
+
+    <div id="alerts"></div>
+    <div id="file-list" class="mb-4"></div>
+
+    <hr>
+    <h5 id="how-title"></h5>
+    <p id="how-text" class="muted"></p>
+  </div>
+
+  <script>
+  (function(){
+    const MAX_FILES = 100;
+    const langSelect = document.getElementById('lang-select');
+    const texts = {
+      en: {
+        title: "Batch Photo Renamer",
+        instructions: "Upload up to 100 photos. Each file will be renamed to the last word of its original filename (converted to ALL CAPS) while preserving the file extension. You can download them one by one or all at once.",
+        selectLabel: "Select photos",
+        previewBtn: "Preview Renames",
+        downloadAllBtn: "Download All",
+        clearBtn: "Clear",
+        noFiles: "No files selected.",
+        pleaseChoose: "Please choose files first.",
+        previewUpdated: "Preview updated.",
+        howTitle: "How 'last word' is determined",
+        howText: "The filename (without extension) is split on spaces and separators (space, underscore, hyphen, dot). The last non-empty token becomes the new name. Example: IMG_2025-07-26 family beach.jpg → BEACH.jpg"
+      },
+      pt: {
+        title: "Renomeador de Fotos em Lote",
+        instructions: "Carregue até 100 fotos. Cada arquivo será renomeado para a última palavra do nome original (convertida em MAIÚSCULAS), mantendo a extensão. Você pode baixá-los um por um ou todos de uma vez.",
+        selectLabel: "Selecionar fotos",
+        previewBtn: "Pré-visualizar",
+        downloadAllBtn: "Baixar Todos",
+        clearBtn: "Limpar",
+        noFiles: "Nenhum arquivo selecionado.",
+        pleaseChoose: "Por favor, escolha os arquivos primeiro.",
+        previewUpdated: "Pré-visualização atualizada.",
+        howTitle: "Como é determinada a 'última palavra'",
+        howText: "O nome do arquivo (sem extensão) é dividido em espaços e separadores (espaço, sublinhado, hífen, ponto). O último elemento não vazio torna-se o novo nome. Exemplo: IMG_2025-07-26 familia praia.jpg → PRAIA.jpg"
+      }
+    };
+
+    function setLanguage(lang) {
+      const t = texts[lang] || texts.en;
+      document.getElementById('title').textContent = t.title;
+      document.getElementById('instructions').textContent = t.instructions;
+      document.getElementById('select-label').textContent = t.selectLabel;
+      document.getElementById('preview-btn').textContent = t.previewBtn;
+      document.getElementById('download-all-btn').textContent = t.downloadAllBtn;
+      document.getElementById('clear-btn').textContent = t.clearBtn;
+      document.getElementById('how-title').textContent = t.howTitle;
+      document.getElementById('how-text').textContent = t.howText;
+    }
+    langSelect.addEventListener('change', () => setLanguage(langSelect.value));
+    setLanguage('en');
+
+    const fileInput = document.getElementById('file-input');
+    const previewBtn = document.getElementById('preview-btn');
+    const downloadAllBtn = document.getElementById('download-all-btn');
+    const fileList = document.getElementById('file-list');
+    const clearBtn = document.getElementById('clear-btn');
+
+    let selectedFiles = [];
+    let renameMap = [];
+
+    function basenameWithoutExt(filename) {
+      const lastDot = filename.lastIndexOf('.');
+      return lastDot === -1 ? filename : filename.slice(0, lastDot);
+    }
+    function extOf(filename) {
+      const lastDot = filename.lastIndexOf('.');
+      return lastDot === -1 ? '' : filename.slice(lastDot);
+    }
+    function lastWordFrom(name) {
+      const replaced = name.replace(/[^0-9A-Za-z\u00C0-\u024F]+/g, ' ');
+      const tokens = replaced.split(/\s+/).filter(Boolean);
+      return tokens.length ? tokens[tokens.length-1] : name;
+    }
+    function computeRenames(files) {
+      const map = [];
+      const used = {};
+      for (const file of files) {
+        const base = basenameWithoutExt(file.name);
+        const ext = extOf(file.name) || '';
+        const last = lastWordFrom(base);
+        let candidateBase = last.toUpperCase() || base.toUpperCase();
+        candidateBase = candidateBase.replace(/^[\s.]+|[\s.]+$/g, '').replace(/[\/\\:*?"<>|]+/g, '-');
+        if (!candidateBase) candidateBase = 'FILE';
+        let newName = candidateBase + ext;
+        if (used[newName]) {
+          newName = candidateBase + '-' + used[newName] + ext;
+          used[candidateBase] = (used[candidateBase]||1)+1;
+        } else {
+          used[newName] = 1;
+        }
+        map.push({orig:file,newName});
+      }
+      return map;
+    }
+    function renderPreview(map) {
+      fileList.innerHTML = '';
+      if (!map.length) {
+        fileList.innerHTML = `<p class="muted">${texts[langSelect.value].noFiles}</p>`;
+        downloadAllBtn.disabled = true;
+        return;
+      }
+      for (const entry of map) {
+        const row = document.createElement('div');
+        row.className = 'file-row';
+        const img = document.createElement('img');
+        img.className = 'thumb';
+        const reader = new FileReader();
+        reader.onload = e => img.src = e.target.result;
+        reader.readAsDataURL(entry.orig);
+
+        const meta = document.createElement('div');
+        meta.innerHTML = `<div><strong>Original:</strong> ${entry.orig.name}</div><div><strong>Renamed:</strong> ${entry.newName}</div>`;
+
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-sm btn-outline-primary';
+        btn.textContent = 'Download';
+        btn.addEventListener('click', () => downloadFile(entry));
+
+        row.appendChild(img);
+        row.appendChild(meta);
+        row.appendChild(btn);
+        fileList.appendChild(row);
+      }
+      downloadAllBtn.disabled = false;
+    }
+
+    function downloadFile(entry) {
+      entry.orig.arrayBuffer().then(buf => {
+        const blob = new Blob([buf], {type: entry.orig.type});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = entry.newName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      });
+    }
+
+    function downloadAll() {
+      let delay = 0;
+      renameMap.forEach(entry => {
+        setTimeout(() => downloadFile(entry), delay);
+        delay += 300; // small gap so browser handles them
+      });
+    }
+
+    fileInput.addEventListener('change', e => {
+      selectedFiles = Array.from(e.target.files).slice(0,MAX_FILES);
+      renameMap = computeRenames(selectedFiles);
+      renderPreview(renameMap);
+    });
+    previewBtn.addEventListener('click', () => {
+      if (!selectedFiles.length) {
+        alert(texts[langSelect.value].pleaseChoose);
+        return;
+      }
+      renameMap = computeRenames(selectedFiles);
+      renderPreview(renameMap);
+    });
+    clearBtn.addEventListener('click', () => {
+      fileInput.value = '';
+      selectedFiles=[];renameMap=[];
+      fileList.innerHTML='';
+      downloadAllBtn.disabled=true;
+    });
+    downloadAllBtn.addEventListener('click', downloadAll);
+  })();
+  </script>
+</body>
+</html>
